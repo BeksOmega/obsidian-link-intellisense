@@ -1,11 +1,16 @@
 {
-	"id": "sample-plugin",
-	"name": "Sample Plugin",
-	"version": "1.0.0",
-	"minAppVersion": "0.15.0",
-	"description": "Demonstrates some of the capabilities of the Obsidian API.",
-	"author": "Obsidian",
-	"authorUrl": "https://obsidian.md",
-	"fundingUrl": "https://obsidian.md/pricing",
-	"isDesktopOnly": false
+    "id": "enhanced-link-intellisense",
+    "name": "Enhanced Link Intellisense",
+    "version": "1.0.0",
+    "minAppVersion": "0.15.0",
+    "description": "Provides enhanced intellisense for note links, including recent files and Omnisearch integration.",
+    "author": "AI Developer",
+    "authorUrl": "",
+    "isDesktopOnly": false,
+    "dependencies": [
+        {
+            "id": "omnisearch",
+            "version": "1.0.0"
+        }
+    ]
 }
