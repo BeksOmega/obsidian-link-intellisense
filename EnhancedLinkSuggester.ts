@@ -159,29 +159,19 @@ export class EnhancedLinkSuggester extends EditorSuggest<MySuggestion> {
 		if (query.length > 0 && this.omnisearchApi) {
 			try {
 				const omniResults = await this.omnisearchApi.search(query);
-				console.log("results", omniResults);
 				for (const result of omniResults) {
 					// Get content up to first <br>
 					const excerpt = result.excerpt.split("<br>")[0];
 
 					// Find all matches in the excerpt
 					const newMatches: { match: string; offset: number }[] = [];
-					for (const match of result.matches) {
-						const matchText = match.match;
-						// Escape special regex characters in the match text
-						const escapedMatch = matchText.replace(
-							/[.*+?^${}()|[\]\\]/g,
-							"\\$&"
-						);
-						const regex = new RegExp(escapedMatch, "gi");
-						let matchResult;
-
-						while ((matchResult = regex.exec(excerpt)) !== null) {
-							newMatches.push({
-								match: matchText,
-								offset: matchResult.index,
-							});
-						}
+					const regex = new RegExp(query, "gi");
+					let matchResult;
+					while ((matchResult = regex.exec(excerpt)) !== null) {
+						newMatches.push({
+							match: matchResult[0],
+							offset: matchResult.index,
+						});
 					}
 
 					// Find earliest match to determine truncation
@@ -288,7 +278,7 @@ export class EnhancedLinkSuggester extends EditorSuggest<MySuggestion> {
 			);
 
 			if (suggestion.matches && suggestion.matches.length > 0) {
-				// Sort matches by offset to handle overlapping matches
+				// Sort matches by start position to handle overlapping matches
 				const sortedMatches = [...suggestion.matches].sort(
 					(a, b) => a.offset - b.offset
 				);

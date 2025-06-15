@@ -37,7 +37,7 @@ const context = await esbuild.context({
 	logLevel: "info",
 	sourcemap: prod ? false : "inline",
 	treeShaking: true,
-	outfile: "main.js",
+	outfile: "/home/beka/Dropbox/Beka/Nellie/.obsidian/plugins/obsidian-link-intellisense/main.js",
 	minify: prod,
 });
 

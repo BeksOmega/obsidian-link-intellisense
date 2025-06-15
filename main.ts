@@ -28,7 +28,7 @@ export default class EnhancedLinkPlugin extends Plugin {
 	}
 
 	async onload() {
-		console.log("Loading Enhanced Link Plugin");
+		console.log("Loading Enhanced Link Plugin test");
 
 		if (
 			typeof window.omnisearch === "undefined" ||
