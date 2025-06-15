@@ -1,260 +1,351 @@
 import {
-    App,
-    Editor,
-    EditorPosition,
-    EditorSuggest,
-    EditorSuggestContext,
-    EditorSuggestTriggerInfo,
-    TFile,
-    fuzzySearch, // Ensure this is imported
-    FrontMatterCache,
-    HeadingCache,
-    BlockCache,
-} from 'obsidian';
-import { debounced } from './utils';
+	App,
+	Editor,
+	EditorPosition,
+	EditorSuggest,
+	EditorSuggestContext,
+	EditorSuggestTriggerInfo,
+	TFile,
+	FrontMatterCache,
+	HeadingCache,
+} from "obsidian";
+import * as fuzzy from "fuzzy";
 
 interface MySuggestion {
-    type: 'note' | 'alias' | 'heading' | 'block' | 'content';
-    displayText: string;
-    insertText: string;
-    filePath: string;
-    score: number;
-    isRecent?: boolean;
+	type: "note" | "alias" | "heading" | "block" | "content";
+	displayText: string;
+	insertText: string;
+	filePath: string;
+	score: number;
+	isRecent?: boolean;
+	content?: string;
+	matches?: { match: string; offset: number }[];
 }
 
 export class EnhancedLinkSuggester extends EditorSuggest<MySuggestion> {
-    private debouncedGetSuggestions: (context: EditorSuggestContext) => Promise<MySuggestion[]>;
-    private recentFiles: TFile[] = [];
-    private readonly MAX_RECENT_FILES = 20;
-    private omnisearchApi: typeof window.omnisearch;
+	private recentFiles: TFile[] = [];
+	private readonly MAX_RECENT_FILES = 20;
+	private readonly CHARS_BEFORE_MATCH = 20;
+	private omnisearchApi: typeof window.omnisearch;
 
-    constructor(app: App, omnisearchApi: typeof window.omnisearch) {
-        super(app);
-        this.omnisearchApi = omnisearchApi;
-        this.debouncedGetSuggestions = debounced(this._getSuggestions.bind(this), 300);
-        this.updateRecentFiles();
-        this.app.workspace.on('file-open', () => this.updateRecentFiles()); // Bind 'this' context correctly
-    }
+	constructor(app: App, omnisearchApi: typeof window.omnisearch) {
+		super(app);
+		this.omnisearchApi = omnisearchApi;
+		this.updateRecentFiles();
+		this.app.workspace.on("file-open", () => this.updateRecentFiles());
+	}
 
-    private updateRecentFiles(): void {
-        const recentFilePaths = this.app.workspace.getLastOpenFiles().slice(0, this.MAX_RECENT_FILES);
-        this.recentFiles = recentFilePaths
-            .map(path => this.app.vault.getFileByPath(path))
-            .filter((file): file is TFile => file instanceof TFile);
-    }
+	private updateRecentFiles(): void {
+		const recentFilePaths = this.app.workspace
+			.getLastOpenFiles()
+			.slice(0, this.MAX_RECENT_FILES);
+		this.recentFiles = recentFilePaths
+			.map((path) => this.app.vault.getFileByPath(path))
+			.filter((file): file is TFile => file instanceof TFile);
+	}
 
-    onTrigger(cursor: EditorPosition, editor: Editor, file: TFile | null): EditorSuggestTriggerInfo | null {
-        const line = editor.getLine(cursor.line);
-        const match = line.substring(0, cursor.ch).match(/\[\[([^\]]*)$/);
-        if (match) {
-            return {
-                start: { line: cursor.line, ch: match.index! + 2 },
-                end: cursor,
-                query: match[1],
-            };
-        }
-        return null;
-    }
+	onTrigger(
+		cursor: EditorPosition,
+		editor: Editor,
+		file: TFile | null
+	): EditorSuggestTriggerInfo | null {
+		const line = editor.getLine(cursor.line);
+		const match = line.substring(0, cursor.ch).match(/\[([^\]]*)$/);
+		if (match) {
+			return {
+				start: {
+					line: cursor.line,
+					ch: match.index!,
+				},
+				end: {
+					line: cursor.line,
+					// This assumes that you have matching brackets turned on.
+					ch: cursor.ch + 1,
+				},
+				query: match[1],
+			};
+		}
+		return null;
+	}
 
-    async getSuggestions(context: EditorSuggestContext): Promise<MySuggestion[]> {
-        // Store context for use in _getSuggestions if needed for editor operations
-        // this.context is already available in EditorSuggest
-        return this.debouncedGetSuggestions(context);
-    }
+	async getSuggestions(
+		context: EditorSuggestContext
+	): Promise<MySuggestion[]> {
+		const query = context.query.toLowerCase();
+		const uniqueSuggestions = new Map<string, MySuggestion>();
+		const recentMatches: MySuggestion[] = [];
+		const currentFilePath = context.file?.path;
 
-    private async _getSuggestions(context: EditorSuggestContext): Promise<MySuggestion[]> {
-        const query = context.query.toLowerCase();
-        const uniqueSuggestions = new Map<string, MySuggestion>();
-        let recentMatches: MySuggestion[] = [];
+		// --- Stage 1: Recent Files (from previous step, ensure it's complete) ---
+		for (const file of this.recentFiles) {
+			const cache = this.app.metadataCache.getFileCache(file);
+			if (!cache) continue;
 
-        // --- Stage 1: Recent Files (from previous step, ensure it's complete) ---
-        for (const file of this.recentFiles) {
-            const cache = this.app.metadataCache.getFileCache(file);
-            if (!cache) continue;
+			const titleMatchResult = fuzzy.filter(query, [
+				file.basename.toLowerCase(),
+			]);
+			if (titleMatchResult.length > 0) {
+				// Get first line of content
+				const content = await this.app.vault.cachedRead(file);
+				const firstLine = content.split("\n")[0].trim();
 
-            const titleMatchResult = query === '' ? null : fuzzySearch(query, file.basename.toLowerCase());
-            if (query === '' || titleMatchResult) {
-                recentMatches.push({
-                    type: 'note',
-                    displayText: file.basename,
-                    insertText: file.basename,
-                    filePath: file.path,
-                    score: query === '' ? 10000 : (titleMatchResult?.score || 0) + (query === file.basename.toLowerCase() ? 1000 : 0), // Boost exact recent title
-                    isRecent: true,
-                });
-            }
+				recentMatches.push({
+					type: "note",
+					displayText: file.basename,
+					insertText: file.basename,
+					filePath: file.path,
+					score: 1000,
+					isRecent: true,
+					content: firstLine,
+				});
+			}
 
-            if (query !== '') {
-                const frontmatter = cache.frontmatter as FrontMatterCache;
-                if (frontmatter && frontmatter.aliases) {
-                    for (const alias of frontmatter.aliases) {
-                        if (typeof alias === 'string') {
-                            const aliasMatchResult = fuzzySearch(query, alias.toLowerCase());
-                            if (aliasMatchResult) {
-                                recentMatches.push({
-                                    type: 'alias',
-                                    displayText: alias,
-                                    insertText: `${file.basename}|${alias}`,
-                                    filePath: file.path,
-                                    score: aliasMatchResult.score + (query === alias.toLowerCase() ? 500 : 0), // Boost exact alias
-                                    isRecent: true,
-                                });
-                            }
-                        }
-                    }
-                }
+			if (query !== "") {
+				const frontmatter = cache.frontmatter as FrontMatterCache;
+				if (frontmatter && frontmatter.aliases) {
+					const aliases = fuzzy.filter<string>(
+						query,
+						frontmatter.aliases
+					);
+					for (const alias of aliases) {
+						// Get first line of content for aliases too
+						const content = await this.app.vault.read(file);
+						const firstLine = content.split("\n")[0].trim();
 
-                if (cache.headings) {
-                    for (const heading of cache.headings) {
-                        const headingMatchResult = fuzzySearch(query, heading.heading.toLowerCase());
-                        if (headingMatchResult) {
-                            recentMatches.push({
-                                type: 'heading',
-                                displayText: heading.heading,
-                                insertText: `${file.basename}#${heading.heading}`,
-                                filePath: file.path,
-                                score: headingMatchResult.score,
-                                isRecent: true,
-                            });
-                        }
-                    }
-                }
+						recentMatches.push({
+							type: "alias",
+							displayText: alias.original,
+							insertText: `${file.basename}|${alias}`,
+							filePath: file.path,
+							score: 500,
+							isRecent: true,
+							content: firstLine,
+						});
+					}
+				}
 
-                if (cache.blocks && this.context?.editor) { // Ensure editor context is available
-                    for (const blockId in cache.blocks) {
-                        if (Object.prototype.hasOwnProperty.call(cache.blocks, blockId)) {
-                            const blockDefinition = cache.blocks[blockId];
-                            let blockTextContent = "";
-                            try {
-                               const fileContent = await this.app.vault.cachedRead(file);
-                               const blockPosition = blockDefinition.position;
-                               // Need editor instance to convert pos to offset
-                               const editor = this.context.editor;
-                               const startOffset = editor.posToOffset(blockPosition.start);
-                               const endOffset = editor.posToOffset(blockPosition.end);
-                               blockTextContent = fileContent.substring(startOffset, endOffset);
-                            } catch (e) {
-                                console.warn("Could not read block content for recent file search:", e);
-                            }
+				if (cache.headings) {
+					const headings = fuzzy.filter<HeadingCache>(
+						query,
+						cache.headings,
+						{
+							extract: (heading) => heading.heading.toLowerCase(),
+						}
+					);
+					for (const heading of headings) {
+						recentMatches.push({
+							type: "heading",
+							displayText: heading.original.heading,
+							insertText: `${file.basename}#${heading.original.heading}`,
+							filePath: file.path,
+							score: 100,
+							isRecent: true,
+						});
+					}
+				}
+			}
+		}
 
-                            if (blockTextContent) {
-                                const blockMatchResult = fuzzySearch(query, blockTextContent.toLowerCase().slice(0, 256)); // Search on first 256 chars for perf
-                                if (blockMatchResult) {
-                                    recentMatches.push({
-                                        type: 'block',
-                                        displayText: blockTextContent.split('\n')[0].substring(0, 80),
-                                        insertText: `${file.basename}#^${blockId}`,
-                                        filePath: file.path,
-                                        score: blockMatchResult.score,
-                                        isRecent: true,
-                                    });
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
+		for (const sug of recentMatches) {
+			if (
+				!uniqueSuggestions.has(sug.insertText) ||
+				uniqueSuggestions.get(sug.insertText)!.score < sug.score
+			) {
+				uniqueSuggestions.set(sug.insertText, sug);
+			}
+		}
 
-        recentMatches.sort((a, b) => b.score - a.score); // Sort recent matches by their own scores first
-        for (const sug of recentMatches) {
-            if (!uniqueSuggestions.has(sug.insertText) || (uniqueSuggestions.get(sug.insertText)!.score < sug.score) ) {
-                 uniqueSuggestions.set(sug.insertText, sug);
-            }
-        }
+		// --- Stage 2: Omnisearch (if query exists) ---
+		if (query.length > 0 && this.omnisearchApi) {
+			try {
+				const omniResults = await this.omnisearchApi.search(query);
+				console.log("results", omniResults);
+				for (const result of omniResults) {
+					// Get content up to first <br>
+					const excerpt = result.excerpt.split("<br>")[0];
 
-        // --- Stage 2: Omnisearch (if query exists) ---
-        if (query.length > 0 && this.omnisearchApi) {
-            try {
-                const omniResults = await this.omnisearchApi.search(query);
-                for (const result of omniResults) {
-                    const file = this.app.vault.getFileByPath(result.path);
-                    if (file) {
-                        const omniSug: MySuggestion = {
-                            type: 'content', // Omnisearch results are 'content' type
-                            displayText: file.basename, // Display note title
-                            insertText: file.basename,  // Insert note title (standard link)
-                            filePath: file.path,
-                            score: result.score, // Use Omnisearch's score
-                            isRecent: this.recentFiles.some(rf => rf.path === file.path) // Mark if it's also a recent file
-                        };
+					// Find all matches in the excerpt
+					const newMatches: { match: string; offset: number }[] = [];
+					for (const match of result.matches) {
+						const matchText = match.match;
+						// Escape special regex characters in the match text
+						const escapedMatch = matchText.replace(
+							/[.*+?^${}()|[\]\\]/g,
+							"\\$&"
+						);
+						const regex = new RegExp(escapedMatch, "gi");
+						let matchResult;
 
-                        const existingSug = uniqueSuggestions.get(omniSug.insertText);
-                        if (!existingSug) {
-                            uniqueSuggestions.set(omniSug.insertText, omniSug);
-                        } else {
-                            // As per plan: "Add to uniqueSuggestions only if not already present or if Omnisearch score is higher
-                            // AND existing suggestion is not 'note' or 'alias'".
-                            // This means Omnisearch can replace a 'heading' or 'block' or another 'content' match if its score is better for the same note.
-                            // It should not replace a 'note' or 'alias' match from recents for the *same insertText*.
-                            // If existing is 'note' or 'alias', we prefer that, unless Omnisearch found it AND it's also recent AND has a higher score.
-                            // The current logic for recent files already tries to add note/alias with high scores.
-                            // If Omnisearch finds a note that was *also* a recent 'note' or 'alias', and Omnisearch gives it a *higher* score,
-                            // we might want to update. But the current structure adds recents first.
-                            // Let's refine: if Omnisearch provides a result for the *same note* (insertText)
-                            // and the existing one is from recents but only a heading/block match,
-                            // and Omnisearch has a better score, it can be replaced.
-                            // If the existing one is a note/alias from recents, it's likely preferred.
-                            // The provided rule: "if (!existingSug || (existingSug.score < omniSug.score && existingSug.type !== 'note' && existingSug.type !== 'alias'))"
-                            // This implies an Omnisearch result (type 'content') could replace a recent 'heading' or 'block' if its score is higher.
-                            // This seems reasonable.
-                            if (existingSug.type !== 'note' && existingSug.type !== 'alias') {
-                                if (omniSug.score > existingSug.score) {
-                                    uniqueSuggestions.set(omniSug.insertText, omniSug);
-                                }
-                            } else if (existingSug.type === 'content' && omniSug.score > existingSug.score) {
-                                // If existing is also content, replace if new score is higher
-                                uniqueSuggestions.set(omniSug.insertText, omniSug);
-                            }
-                        }
-                    }
-                }
-            } catch (e) {
-                console.error("Error using Omnisearch:", e);
-                // Optionally, notify the user that Omnisearch failed for this query
-                // new Notice("Omnisearch query failed.", 3000);
-            }
-        }
+						while ((matchResult = regex.exec(excerpt)) !== null) {
+							newMatches.push({
+								match: matchText,
+								offset: matchResult.index,
+							});
+						}
+					}
 
-        // Convert map to array
-        let suggestions = Array.from(uniqueSuggestions.values());
+					// Find earliest match to determine truncation
+					const earliestMatch = newMatches.reduce(
+						(earliest, current) =>
+							!earliest || current.offset < earliest.offset
+								? current
+								: earliest,
+						null as { offset: number } | null
+					);
 
-        // Final sorting logic
-        suggestions.sort((a, b) => {
-            // Prioritize recent items
-            if (a.isRecent && !b.isRecent) return -1;
-            if (!a.isRecent && b.isRecent) return 1;
+					// Truncate content before the first match
+					let truncatedExcerpt = excerpt;
+					let startIndex = 0;
 
-            // If both are recent or both are not, sort by score descending
-            // Within recents, 'note' and 'alias' types might be boosted by earlier scoring.
-            // If types are different but scores are similar, this doesn't differentiate further,
-            // but the scores themselves should reflect preference (e.g. exact recent title match has high score).
-            return b.score - a.score;
-        });
+					if (earliestMatch) {
+						startIndex = Math.max(
+							0,
+							earliestMatch.offset - this.CHARS_BEFORE_MATCH
+						);
+						if (startIndex > 0) {
+							truncatedExcerpt =
+								"..." + excerpt.slice(startIndex);
+							// Adjust match offsets for the truncation
+							newMatches.forEach((match) => {
+								match.offset = match.offset - startIndex + 3; // Add 3 for '...'
+							});
+						} else {
+							truncatedExcerpt = excerpt.slice(startIndex);
+							// Adjust match offsets for the truncation
+							newMatches.forEach((match) => {
+								match.offset = match.offset - startIndex;
+							});
+						}
+					}
 
-        return suggestions;
-    }
+					const omniSug: MySuggestion = {
+						type: "content", // Omnisearch results are 'content' type
+						displayText: result.basename, // Display note title
+						insertText: result.basename, // Insert note title (standard link)
+						filePath: result.path,
+						score: result.score, // Use Omnisearch's score
+						isRecent: this.recentFiles.some(
+							(rf) => rf.path === result.path
+						), // Mark if it's also a recent file
+						content: truncatedExcerpt,
+						matches: newMatches,
+					};
 
-    // --- Part 4: Rendering and Selection ---
-    renderSuggestion(suggestion: MySuggestion, el: HTMLElement): void {
-        el.empty(); // Clear any existing content
-        // As per plan: "display only the Note Title" (or alias/heading/block snippet for displayText)
-        // "Do not show the file path or indicate the type of link"
-        el.createEl('div', { text: suggestion.displayText, cls: 'enhanced-link-suggestion-text' });
-    }
+					const existingSug = uniqueSuggestions.get(
+						omniSug.insertText
+					);
+					if (!existingSug) {
+						uniqueSuggestions.set(omniSug.insertText, omniSug);
+					} else {
+						if (omniSug.score > existingSug.score) {
+							uniqueSuggestions.set(omniSug.insertText, omniSug);
+						}
+					}
+				}
+			} catch (e) {
+				console.error("Error using Omnisearch:", e);
+				// Optionally, notify the user that Omnisearch failed for this query
+				// new Notice("Omnisearch query failed.", 3000);
+			}
+		}
 
-    selectSuggestion(suggestion: MySuggestion, event: KeyboardEvent | MouseEvent): void {
-        // this.context is provided by EditorSuggest and should be available here
-        if (!this.context || !this.context.editor) {
-            return;
-        }
+		// Convert map to array
+		const suggestions = Array.from(uniqueSuggestions.values());
 
-        this.context.editor.replaceRange(
-            `[[${suggestion.insertText}]]`, // Use the pre-formatted insertText
-            this.context.start,
-            this.context.end
-        );
+		// Filter out current file
+		const filteredSuggestions = suggestions.filter(
+			(sug) => sug.filePath !== currentFilePath
+		);
 
-        // No need to close the suggester explicitly, Obsidian handles it.
-    }
+		// Final sorting logic
+		filteredSuggestions.sort((a, b) => {
+			// Prioritize recent items
+			if (a.isRecent && !b.isRecent) return -1;
+			if (!a.isRecent && b.isRecent) return 1;
+
+			// If both are recent or both are not, sort by score descending
+			return b.score - a.score;
+		});
+
+		return filteredSuggestions;
+	}
+
+	// --- Part 4: Rendering and Selection ---
+	renderSuggestion(suggestion: MySuggestion, el: HTMLElement): void {
+		el.empty();
+		const container = el.createDiv("enhanced-link-suggestion-container");
+
+		// Main text (title/alias/heading)
+		container.createEl("div", {
+			text: suggestion.displayText,
+			cls: "enhanced-link-suggestion-text",
+		});
+
+		// Content preview for Omnisearch results
+		if (suggestion.content) {
+			const contentDiv = container.createDiv(
+				"enhanced-link-suggestion-content"
+			);
+
+			if (suggestion.matches && suggestion.matches.length > 0) {
+				// Sort matches by offset to handle overlapping matches
+				const sortedMatches = [...suggestion.matches].sort(
+					(a, b) => a.offset - b.offset
+				);
+				let lastIndex = 0;
+
+				// Create text nodes and highlight spans for each match
+				for (const match of sortedMatches) {
+					// Add text before the match
+					if (match.offset > lastIndex) {
+						contentDiv.appendChild(
+							document.createTextNode(
+								suggestion.content.slice(
+									lastIndex,
+									match.offset
+								)
+							)
+						);
+					}
+
+					// Add highlighted match
+					contentDiv.createEl("span", {
+						text: match.match,
+						cls: "highlight",
+					});
+
+					lastIndex = match.offset + match.match.length;
+				}
+
+				// Add any remaining text after the last match
+				if (lastIndex < suggestion.content.length) {
+					contentDiv.appendChild(
+						document.createTextNode(
+							suggestion.content.slice(lastIndex)
+						)
+					);
+				}
+			} else {
+				// If no matches, just show the content as is
+				contentDiv.appendChild(
+					document.createTextNode(suggestion.content)
+				);
+			}
+		}
+	}
+
+	selectSuggestion(
+		suggestion: MySuggestion,
+		event: KeyboardEvent | MouseEvent
+	): void {
+		if (!this.context || !this.context.editor) {
+			return;
+		}
+
+		this.context.editor.replaceRange(
+			`[[${suggestion.insertText}]]`, // Use the pre-formatted insertText
+			this.context.start,
+			this.context.end
+		);
+	}
 }
