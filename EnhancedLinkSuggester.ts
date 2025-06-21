@@ -35,6 +35,29 @@ export class EnhancedLinkSuggester extends EditorSuggest<MySuggestion> {
 		this.app.workspace.on("file-open", () => this.updateRecentFiles());
 	}
 
+	private async getFirstLineWithoutFrontmatter(file: TFile): Promise<string> {
+		const content = await this.app.vault.cachedRead(file);
+		const cache = this.app.metadataCache.getFileCache(file);
+		const frontmatter = cache?.frontmatter;
+
+		const lines = content.split("\n");
+		let startLine = 0;
+
+		if (frontmatter && frontmatter.position) {
+			// frontmatter.position.end.line is the line number of the closing '---'
+			// So, the actual content starts from the line after it.
+			startLine = frontmatter.position.end.line + 1;
+		}
+
+		for (let i = startLine; i < lines.length; i++) {
+			const trimmedLine = lines[i].trim();
+			if (trimmedLine) {
+				return trimmedLine;
+			}
+		}
+		return ""; // Return empty string if no content found after frontmatter
+	}
+
 	private updateRecentFiles(): void {
 		const recentFilePaths = this.app.workspace
 			.getLastOpenFiles()
@@ -85,10 +108,7 @@ export class EnhancedLinkSuggester extends EditorSuggest<MySuggestion> {
 				file.basename.toLowerCase(),
 			]);
 			if (titleMatchResult.length > 0) {
-				// Get first line of content
-				const content = await this.app.vault.cachedRead(file);
-				const firstLine = content.split("\n")[0].trim();
-
+				const firstLine = await this.getFirstLineWithoutFrontmatter(file);
 				recentMatches.push({
 					type: "note",
 					displayText: file.basename,
@@ -108,14 +128,11 @@ export class EnhancedLinkSuggester extends EditorSuggest<MySuggestion> {
 						frontmatter.aliases
 					);
 					for (const alias of aliases) {
-						// Get first line of content for aliases too
-						const content = await this.app.vault.read(file);
-						const firstLine = content.split("\n")[0].trim();
-
+						const firstLine = await this.getFirstLineWithoutFrontmatter(file);
 						recentMatches.push({
 							type: "alias",
 							displayText: alias.original,
-							insertText: `${file.basename}|${alias}`,
+							insertText: `${file.basename}|${alias.original}`, // Use alias.original for insertText
 							filePath: file.path,
 							score: 500,
 							isRecent: true,
@@ -160,52 +177,10 @@ export class EnhancedLinkSuggester extends EditorSuggest<MySuggestion> {
 			try {
 				const omniResults = await this.omnisearchApi.search(query);
 				for (const result of omniResults) {
-					// Get content up to first <br>
-					const excerpt = result.excerpt.split("<br>")[0];
-
-					// Find all matches in the excerpt
-					const newMatches: { match: string; offset: number }[] = [];
-					const regex = new RegExp(query, "gi");
-					let matchResult;
-					while ((matchResult = regex.exec(excerpt)) !== null) {
-						newMatches.push({
-							match: matchResult[0],
-							offset: matchResult.index,
-						});
-					}
-
-					// Find earliest match to determine truncation
-					const earliestMatch = newMatches.reduce(
-						(earliest, current) =>
-							!earliest || current.offset < earliest.offset
-								? current
-								: earliest,
-						null as { offset: number } | null
-					);
-
-					// Truncate content before the first match
-					let truncatedExcerpt = excerpt;
-					let startIndex = 0;
-
-					if (earliestMatch) {
-						startIndex = Math.max(
-							0,
-							earliestMatch.offset - this.CHARS_BEFORE_MATCH
-						);
-						if (startIndex > 0) {
-							truncatedExcerpt =
-								"..." + excerpt.slice(startIndex);
-							// Adjust match offsets for the truncation
-							newMatches.forEach((match) => {
-								match.offset = match.offset - startIndex + 3; // Add 3 for '...'
-							});
-						} else {
-							truncatedExcerpt = excerpt.slice(startIndex);
-							// Adjust match offsets for the truncation
-							newMatches.forEach((match) => {
-								match.offset = match.offset - startIndex;
-							});
-						}
+					let firstLineContent = "";
+					const file = this.app.vault.getFileByPath(result.path);
+					if (file) {
+						firstLineContent = await this.getFirstLineWithoutFrontmatter(file);
 					}
 
 					const omniSug: MySuggestion = {
@@ -217,8 +192,8 @@ export class EnhancedLinkSuggester extends EditorSuggest<MySuggestion> {
 						isRecent: this.recentFiles.some(
 							(rf) => rf.path === result.path
 						), // Mark if it's also a recent file
-						content: truncatedExcerpt,
-						matches: newMatches,
+						content: firstLineContent, // Use the first line without frontmatter
+						matches: [], // Matches are no longer highlighted in preview
 					};
 
 					const existingSug = uniqueSuggestions.get(
@@ -271,56 +246,12 @@ export class EnhancedLinkSuggester extends EditorSuggest<MySuggestion> {
 			cls: "enhanced-link-suggestion-text",
 		});
 
-		// Content preview for Omnisearch results
+		// Content preview
 		if (suggestion.content) {
 			const contentDiv = container.createDiv(
 				"enhanced-link-suggestion-content"
 			);
-
-			if (suggestion.matches && suggestion.matches.length > 0) {
-				// Sort matches by start position to handle overlapping matches
-				const sortedMatches = [...suggestion.matches].sort(
-					(a, b) => a.offset - b.offset
-				);
-				let lastIndex = 0;
-
-				// Create text nodes and highlight spans for each match
-				for (const match of sortedMatches) {
-					// Add text before the match
-					if (match.offset > lastIndex) {
-						contentDiv.appendChild(
-							document.createTextNode(
-								suggestion.content.slice(
-									lastIndex,
-									match.offset
-								)
-							)
-						);
-					}
-
-					// Add highlighted match
-					contentDiv.createEl("span", {
-						text: match.match,
-						cls: "highlight",
-					});
-
-					lastIndex = match.offset + match.match.length;
-				}
-
-				// Add any remaining text after the last match
-				if (lastIndex < suggestion.content.length) {
-					contentDiv.appendChild(
-						document.createTextNode(
-							suggestion.content.slice(lastIndex)
-						)
-					);
-				}
-			} else {
-				// If no matches, just show the content as is
-				contentDiv.appendChild(
-					document.createTextNode(suggestion.content)
-				);
-			}
+			contentDiv.setText(suggestion.content);
 		}
 	}
 
