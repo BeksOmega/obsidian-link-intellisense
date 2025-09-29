@@ -19,14 +19,27 @@ declare global {
 	}
 }
 
+/**
+ * EnhancedLinkPlugin is the main class for the Enhanced Link Suggestions plugin.
+ * It handles the plugin's lifecycle, including loading and unloading.
+ */
 export default class EnhancedLinkPlugin extends Plugin {
 	// No need for isOmnisearchAvailable property as per the latest plan,
 	// the check is done directly in onload.
 
+	/**
+	 * Creates an instance of EnhancedLinkPlugin.
+	 * @param {App} app - The Obsidian App instance.
+	 * @param {any} manifest - The plugin manifest.
+	 */
 	constructor(app: App, manifest: any) {
 		super(app, manifest);
 	}
 
+	/**
+	 * This method is called when the plugin is loaded.
+	 * It checks for the presence of the Omnisearch plugin and registers the EnhancedLinkSuggester if it's available.
+	 */
 	async onload() {
 		console.log("Loading Enhanced Link Plugin test");
 
@@ -54,6 +67,10 @@ export default class EnhancedLinkPlugin extends Plugin {
 		}
 	}
 
+	/**
+	 * This method is called when the plugin is unloaded.
+	 * It logs a message to the console.
+	 */
 	onunload() {
 		console.log("Unloading Enhanced Link Plugin");
 		// Obsidian automatically handles unregistering editor suggesters.

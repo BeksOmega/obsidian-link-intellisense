@@ -27,6 +27,22 @@ When you type `[[` to create a link, this plugin:
 3.  Simultaneously, it sends your query to the Omnisearch plugin to find matches in the content of any note in your vault.
 4.  It then combines and ranks these suggestions, aiming to show you the most relevant links first.
 
+## For Developers
+
+### Building the Plugin
+
+To build the plugin, you need to have Node.js and npm installed.
+
+1.  Clone the repository.
+2.  Run `npm install` to install the dependencies.
+3.  Run `npm run build` to build the plugin.
+
+This will create a `main.js` file in the project root, which you can then copy to your Obsidian vault's `.obsidian/plugins/enhanced-link-intellisense` directory.
+
+### Contributing
+
+Contributions are welcome! If you have any ideas, suggestions, or bug reports, please open an issue or submit a pull request.
+
 ---
 
 Developed by AI Developer with assistance from human guidance.
