@@ -11,23 +11,61 @@ import {
 } from "obsidian";
 import * as fuzzy from "fuzzy";
 
+/**
+ * Represents a suggestion item in the link suggester.
+ */
 interface MySuggestion {
+	/** The type of the suggestion. */
 	type: "note" | "alias" | "heading" | "block" | "content";
+	/** The text to display in the suggestion list. */
 	displayText: string;
+	/** The text to insert into the editor when the suggestion is selected. */
 	insertText: string;
+	/** The file path of the suggestion. */
 	filePath: string;
+	/** The score of the suggestion, used for sorting. */
 	score: number;
+	/** Whether the suggestion is from a recent file. */
 	isRecent?: boolean;
+	/** The content of the suggestion, used for preview. */
 	content?: string;
+	/** The matches of the query in the suggestion. */
 	matches?: { match: string; offset: number }[];
 }
 
+/**
+ * EnhancedLinkSuggester provides an enhanced link suggestion experience for Obsidian.
+ * It extends the EditorSuggest class to provide context-aware link suggestions.
+ */
 export class EnhancedLinkSuggester extends EditorSuggest<MySuggestion> {
+	/**
+	 * A list of recently opened files.
+	 * @private
+	 */
 	private recentFiles: TFile[] = [];
+	/**
+	 * The maximum number of recent files to keep track of.
+	 * @private
+	 * @readonly
+	 */
 	private readonly MAX_RECENT_FILES = 20;
+	/**
+	 * The number of characters to show before a match in the content.
+	 * @private
+	 * @readonly
+	 */
 	private readonly CHARS_BEFORE_MATCH = 20;
+	/**
+	 * The Omnisearch API instance.
+	 * @private
+	 */
 	private omnisearchApi: typeof window.omnisearch;
 
+	/**
+	 * Creates an instance of EnhancedLinkSuggester.
+	 * @param {App} app - The Obsidian App instance.
+	 * @param {typeof window.omnisearch} omnisearchApi - The Omnisearch API instance.
+	 */
 	constructor(app: App, omnisearchApi: typeof window.omnisearch) {
 		super(app);
 		this.omnisearchApi = omnisearchApi;
@@ -35,6 +73,12 @@ export class EnhancedLinkSuggester extends EditorSuggest<MySuggestion> {
 		this.app.workspace.on("file-open", () => this.updateRecentFiles());
 	}
 
+	/**
+	 * Gets the first line of a file, excluding frontmatter.
+	 * @private
+	 * @param {TFile} file - The file to read.
+	 * @returns {Promise<string>} The first line of the file without frontmatter.
+	 */
 	private async getFirstLineWithoutFrontmatter(file: TFile): Promise<string> {
 		const content = await this.app.vault.cachedRead(file);
 		const cache = this.app.metadataCache.getFileCache(file);
@@ -58,6 +102,10 @@ export class EnhancedLinkSuggester extends EditorSuggest<MySuggestion> {
 		return ""; // Return empty string if no content found after frontmatter
 	}
 
+	/**
+	 * Updates the list of recent files.
+	 * @private
+	 */
 	private updateRecentFiles(): void {
 		const recentFilePaths = this.app.workspace
 			.getLastOpenFiles()
@@ -67,6 +115,13 @@ export class EnhancedLinkSuggester extends EditorSuggest<MySuggestion> {
 			.filter((file): file is TFile => file instanceof TFile);
 	}
 
+	/**
+	 * This method is called by Obsidian to determine if the suggester should be triggered.
+	 * @param {EditorPosition} cursor - The current cursor position.
+	 * @param {Editor} editor - The editor instance.
+	 * @param {TFile | null} file - The file the editor is in.
+	 * @returns {EditorSuggestTriggerInfo | null} The trigger info if the suggester should be triggered, otherwise null.
+	 */
 	onTrigger(
 		cursor: EditorPosition,
 		editor: Editor,
@@ -91,6 +146,11 @@ export class EnhancedLinkSuggester extends EditorSuggest<MySuggestion> {
 		return null;
 	}
 
+	/**
+	 * This method is called by Obsidian to get the suggestions.
+	 * @param {EditorSuggestContext} context - The context for the suggestions.
+	 * @returns {Promise<MySuggestion[]>} A promise that resolves to a list of suggestions.
+	 */
 	async getSuggestions(
 		context: EditorSuggestContext
 	): Promise<MySuggestion[]> {
@@ -235,7 +295,11 @@ export class EnhancedLinkSuggester extends EditorSuggest<MySuggestion> {
 		return filteredSuggestions;
 	}
 
-	// --- Part 4: Rendering and Selection ---
+	/**
+	 * Renders a suggestion item.
+	 * @param {MySuggestion} suggestion - The suggestion to render.
+	 * @param {HTMLElement} el - The HTML element to render the suggestion in.
+	 */
 	renderSuggestion(suggestion: MySuggestion, el: HTMLElement): void {
 		el.empty();
 		const container = el.createDiv("enhanced-link-suggestion-container");
@@ -255,6 +319,11 @@ export class EnhancedLinkSuggester extends EditorSuggest<MySuggestion> {
 		}
 	}
 
+	/**
+	 * This method is called when a suggestion is selected.
+	 * @param {MySuggestion} suggestion - The selected suggestion.
+	 * @param {KeyboardEvent | MouseEvent} event - The keyboard or mouse event.
+	 */
 	selectSuggestion(
 		suggestion: MySuggestion,
 		event: KeyboardEvent | MouseEvent
