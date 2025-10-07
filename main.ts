@@ -1,7 +1,14 @@
 import { Plugin, Notice, App } from "obsidian";
-import { EnhancedLinkSuggester } from "./EnhancedLinkSuggester"; // Assuming EnhancedLinkSuggester will be in the same directory
+import { EnhancedLinkSuggester } from "./EnhancedLinkSuggester";
 
 // Type declaration for Omnisearch global object
+/**
+ * Extends the global Window interface for the Omnisearch plugin.
+ * @global
+ * @interface Window
+ * @property {object} [omnisearch] - The Omnisearch global object, available if the plugin is active.
+ * @property {function(string): Promise<Array<object>>} [omnisearch.search] - The search function of the Omnisearch plugin.
+ */
 declare global {
 	interface Window {
 		omnisearch?: {
@@ -21,16 +28,15 @@ declare global {
 
 /**
  * EnhancedLinkPlugin is the main class for the Enhanced Link Suggestions plugin.
- * It handles the plugin's lifecycle, including loading and unloading.
+ * It handles the plugin's lifecycle, including loading and unloading, and integrates
+ * with the Omnisearch plugin to provide enhanced link suggestions.
+ * @extends Plugin
  */
 export default class EnhancedLinkPlugin extends Plugin {
-	// No need for isOmnisearchAvailable property as per the latest plan,
-	// the check is done directly in onload.
-
 	/**
 	 * Creates an instance of EnhancedLinkPlugin.
-	 * @param {App} app - The Obsidian App instance.
-	 * @param {any} manifest - The plugin manifest.
+	 * @param {App} app - The Obsidian App instance, provided by Obsidian.
+	 * @param {any} manifest - The plugin manifest, containing metadata about the plugin.
 	 */
 	constructor(app: App, manifest: any) {
 		super(app, manifest);
@@ -38,7 +44,10 @@ export default class EnhancedLinkPlugin extends Plugin {
 
 	/**
 	 * This method is called when the plugin is loaded.
-	 * It checks for the presence of the Omnisearch plugin and registers the EnhancedLinkSuggester if it's available.
+	 * It checks for the presence of the Omnisearch plugin and registers the
+	 * EnhancedLinkSuggester if it's available. If Omnisearch is not found,
+	 * it displays a notice to the user.
+	 * @returns {Promise<void>}
 	 */
 	async onload() {
 		console.log("Loading Enhanced Link Plugin test");
@@ -69,7 +78,9 @@ export default class EnhancedLinkPlugin extends Plugin {
 
 	/**
 	 * This method is called when the plugin is unloaded.
-	 * It logs a message to the console.
+	 * It logs a message to the console for debugging purposes. Any resources
+	 * registered in `onload` are automatically cleaned up by Obsidian.
+	 * @returns {void}
 	 */
 	onunload() {
 		console.log("Unloading Enhanced Link Plugin");

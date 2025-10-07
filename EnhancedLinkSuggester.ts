@@ -12,34 +12,38 @@ import {
 import * as fuzzy from "fuzzy";
 
 /**
- * Represents a suggestion item in the link suggester.
+ * Represents a suggestion item in the link suggester. This interface defines the structure
+ * for each suggestion that will be displayed to the user.
+ * @interface MySuggestion
+ * @property {"note" | "alias" | "heading" | "block" | "content"} type - The type of the suggestion, used for potential styling or logic.
+ * @property {string} displayText - The text to display in the suggestion list (e.g., a note's basename or an alias).
+ * @property {string} insertText - The text to insert into the editor when the suggestion is selected (e.g., `basename#heading`).
+ * @property {string} filePath - The file path of the suggestion, used for filtering and identification.
+ * @property {number} score - The score of the suggestion, used for sorting results. Higher is better.
+ * @property {boolean} [isRecent] - A flag indicating if the suggestion is from a recently opened file.
+ * @property {string} [content] - A content preview for the suggestion, such as the first line of a note.
+ * @property {Array<{match: string, offset: number}>} [matches] - The matches of the query within the suggestion text, for highlighting (currently unused).
  */
 interface MySuggestion {
-	/** The type of the suggestion. */
 	type: "note" | "alias" | "heading" | "block" | "content";
-	/** The text to display in the suggestion list. */
 	displayText: string;
-	/** The text to insert into the editor when the suggestion is selected. */
 	insertText: string;
-	/** The file path of the suggestion. */
 	filePath: string;
-	/** The score of the suggestion, used for sorting. */
 	score: number;
-	/** Whether the suggestion is from a recent file. */
 	isRecent?: boolean;
-	/** The content of the suggestion, used for preview. */
 	content?: string;
-	/** The matches of the query in the suggestion. */
 	matches?: { match: string; offset: number }[];
 }
 
 /**
- * EnhancedLinkSuggester provides an enhanced link suggestion experience for Obsidian.
- * It extends the EditorSuggest class to provide context-aware link suggestions.
+ * Provides an enhanced link suggestion experience for Obsidian.
+ * It extends the EditorSuggest class to provide context-aware link suggestions,
+ * leveraging the Omnisearch plugin for content-based search.
+ * @extends EditorSuggest<MySuggestion>
  */
 export class EnhancedLinkSuggester extends EditorSuggest<MySuggestion> {
 	/**
-	 * A list of recently opened files.
+	 * A list of recently opened files, kept in memory for quick access.
 	 * @private
 	 */
 	private recentFiles: TFile[] = [];
@@ -50,21 +54,21 @@ export class EnhancedLinkSuggester extends EditorSuggest<MySuggestion> {
 	 */
 	private readonly MAX_RECENT_FILES = 20;
 	/**
-	 * The number of characters to show before a match in the content.
+	 * The number of characters to show before a match in the content preview.
 	 * @private
 	 * @readonly
 	 */
 	private readonly CHARS_BEFORE_MATCH = 20;
 	/**
-	 * The Omnisearch API instance.
+	 * The Omnisearch API instance, passed in during initialization.
 	 * @private
 	 */
 	private omnisearchApi: typeof window.omnisearch;
 
 	/**
 	 * Creates an instance of EnhancedLinkSuggester.
-	 * @param {App} app - The Obsidian App instance.
-	 * @param {typeof window.omnisearch} omnisearchApi - The Omnisearch API instance.
+	 * @param {App} app - The Obsidian App instance, used for accessing vault and workspace data.
+	 * @param {typeof window.omnisearch} omnisearchApi - The Omnisearch API instance for content-based searching.
 	 */
 	constructor(app: App, omnisearchApi: typeof window.omnisearch) {
 		super(app);
@@ -74,10 +78,11 @@ export class EnhancedLinkSuggester extends EditorSuggest<MySuggestion> {
 	}
 
 	/**
-	 * Gets the first line of a file, excluding frontmatter.
+	 * Gets the first non-empty line of a file's content, excluding the frontmatter.
+	 * This is used to provide a content preview in the suggestion list.
 	 * @private
 	 * @param {TFile} file - The file to read.
-	 * @returns {Promise<string>} The first line of the file without frontmatter.
+	 * @returns {Promise<string>} The first line of the file's content after the frontmatter.
 	 */
 	private async getFirstLineWithoutFrontmatter(file: TFile): Promise<string> {
 		const content = await this.app.vault.cachedRead(file);
@@ -88,8 +93,6 @@ export class EnhancedLinkSuggester extends EditorSuggest<MySuggestion> {
 		let startLine = 0;
 
 		if (frontmatter && frontmatter.position) {
-			// frontmatter.position.end.line is the line number of the closing '---'
-			// So, the actual content starts from the line after it.
 			startLine = frontmatter.position.end.line + 1;
 		}
 
@@ -99,12 +102,13 @@ export class EnhancedLinkSuggester extends EditorSuggest<MySuggestion> {
 				return trimmedLine;
 			}
 		}
-		return ""; // Return empty string if no content found after frontmatter
+		return ""; // Return empty string if no content is found after the frontmatter
 	}
 
 	/**
-	 * Updates the list of recent files.
+	 * Updates the list of recent files by fetching the latest from the workspace.
 	 * @private
+	 * @returns {void}
 	 */
 	private updateRecentFiles(): void {
 		const recentFilePaths = this.app.workspace
@@ -117,10 +121,11 @@ export class EnhancedLinkSuggester extends EditorSuggest<MySuggestion> {
 
 	/**
 	 * This method is called by Obsidian to determine if the suggester should be triggered.
-	 * @param {EditorPosition} cursor - The current cursor position.
+	 * It triggers when the user types `[[` followed by some text.
+	 * @param {EditorPosition} cursor - The current cursor position in the editor.
 	 * @param {Editor} editor - The editor instance.
-	 * @param {TFile | null} file - The file the editor is in.
-	 * @returns {EditorSuggestTriggerInfo | null} The trigger info if the suggester should be triggered, otherwise null.
+	 * @param {TFile | null} file - The file the editor is currently in.
+	 * @returns {EditorSuggestTriggerInfo | null} Information about the trigger, or `null` if it shouldn't trigger.
 	 */
 	onTrigger(
 		cursor: EditorPosition,
@@ -137,7 +142,6 @@ export class EnhancedLinkSuggester extends EditorSuggest<MySuggestion> {
 				},
 				end: {
 					line: cursor.line,
-					// This assumes that you have matching brackets turned on.
 					ch: cursor.ch + 1,
 				},
 				query: match[1],
@@ -147,9 +151,10 @@ export class EnhancedLinkSuggester extends EditorSuggest<MySuggestion> {
 	}
 
 	/**
-	 * This method is called by Obsidian to get the suggestions.
-	 * @param {EditorSuggestContext} context - The context for the suggestions.
-	 * @returns {Promise<MySuggestion[]>} A promise that resolves to a list of suggestions.
+	 * This method is called by Obsidian to get the suggestions for the current query.
+	 * It combines results from recent files and an Omnisearch query.
+	 * @param {EditorSuggestContext} context - The context for the suggestions, including the query.
+	 * @returns {Promise<MySuggestion[]>} A promise that resolves to a sorted list of suggestions.
 	 */
 	async getSuggestions(
 		context: EditorSuggestContext
@@ -159,11 +164,12 @@ export class EnhancedLinkSuggester extends EditorSuggest<MySuggestion> {
 		const recentMatches: MySuggestion[] = [];
 		const currentFilePath = context.file?.path;
 
-		// --- Stage 1: Recent Files (from previous step, ensure it's complete) ---
+		// Stage 1: Search within recent files for matches in title, aliases, and headings.
 		for (const file of this.recentFiles) {
 			const cache = this.app.metadataCache.getFileCache(file);
 			if (!cache) continue;
 
+			// Match against file title
 			const titleMatchResult = fuzzy.filter(query, [
 				file.basename.toLowerCase(),
 			]);
@@ -181,6 +187,7 @@ export class EnhancedLinkSuggester extends EditorSuggest<MySuggestion> {
 			}
 
 			if (query !== "") {
+				// Match against aliases
 				const frontmatter = cache.frontmatter as FrontMatterCache;
 				if (frontmatter && frontmatter.aliases) {
 					const aliases = fuzzy.filter<string>(
@@ -192,7 +199,7 @@ export class EnhancedLinkSuggester extends EditorSuggest<MySuggestion> {
 						recentMatches.push({
 							type: "alias",
 							displayText: alias.original,
-							insertText: `${file.basename}|${alias.original}`, // Use alias.original for insertText
+							insertText: `${file.basename}|${alias.original}`,
 							filePath: file.path,
 							score: 500,
 							isRecent: true,
@@ -201,6 +208,7 @@ export class EnhancedLinkSuggester extends EditorSuggest<MySuggestion> {
 					}
 				}
 
+				// Match against headings
 				if (cache.headings) {
 					const headings = fuzzy.filter<HeadingCache>(
 						query,
@@ -232,7 +240,7 @@ export class EnhancedLinkSuggester extends EditorSuggest<MySuggestion> {
 			}
 		}
 
-		// --- Stage 2: Omnisearch (if query exists) ---
+		// Stage 2: If there's a query, use Omnisearch to find content-based matches.
 		if (query.length > 0 && this.omnisearchApi) {
 			try {
 				const omniResults = await this.omnisearchApi.search(query);
@@ -244,51 +252,39 @@ export class EnhancedLinkSuggester extends EditorSuggest<MySuggestion> {
 					}
 
 					const omniSug: MySuggestion = {
-						type: "content", // Omnisearch results are 'content' type
-						displayText: result.basename, // Display note title
-						insertText: result.basename, // Insert note title (standard link)
+						type: "content",
+						displayText: result.basename,
+						insertText: result.basename,
 						filePath: result.path,
-						score: result.score, // Use Omnisearch's score
+						score: result.score,
 						isRecent: this.recentFiles.some(
 							(rf) => rf.path === result.path
-						), // Mark if it's also a recent file
-						content: firstLineContent, // Use the first line without frontmatter
-						matches: [], // Matches are no longer highlighted in preview
+						),
+						content: firstLineContent,
+						matches: [],
 					};
 
 					const existingSug = uniqueSuggestions.get(
 						omniSug.insertText
 					);
-					if (!existingSug) {
+					if (!existingSug || omniSug.score > existingSug.score) {
 						uniqueSuggestions.set(omniSug.insertText, omniSug);
-					} else {
-						if (omniSug.score > existingSug.score) {
-							uniqueSuggestions.set(omniSug.insertText, omniSug);
-						}
 					}
 				}
 			} catch (e) {
 				console.error("Error using Omnisearch:", e);
-				// Optionally, notify the user that Omnisearch failed for this query
-				// new Notice("Omnisearch query failed.", 3000);
 			}
 		}
 
-		// Convert map to array
+		// Combine, filter, and sort the suggestions.
 		const suggestions = Array.from(uniqueSuggestions.values());
-
-		// Filter out current file
 		const filteredSuggestions = suggestions.filter(
 			(sug) => sug.filePath !== currentFilePath
 		);
 
-		// Final sorting logic
 		filteredSuggestions.sort((a, b) => {
-			// Prioritize recent items
 			if (a.isRecent && !b.isRecent) return -1;
 			if (!a.isRecent && b.isRecent) return 1;
-
-			// If both are recent or both are not, sort by score descending
 			return b.score - a.score;
 		});
 
@@ -296,21 +292,20 @@ export class EnhancedLinkSuggester extends EditorSuggest<MySuggestion> {
 	}
 
 	/**
-	 * Renders a suggestion item.
+	 * Renders a single suggestion item in the suggestion list.
 	 * @param {MySuggestion} suggestion - The suggestion to render.
-	 * @param {HTMLElement} el - The HTML element to render the suggestion in.
+	 * @param {HTMLElement} el - The HTML element to render the suggestion into.
+	 * @returns {void}
 	 */
 	renderSuggestion(suggestion: MySuggestion, el: HTMLElement): void {
 		el.empty();
 		const container = el.createDiv("enhanced-link-suggestion-container");
 
-		// Main text (title/alias/heading)
 		container.createEl("div", {
 			text: suggestion.displayText,
 			cls: "enhanced-link-suggestion-text",
 		});
 
-		// Content preview
 		if (suggestion.content) {
 			const contentDiv = container.createDiv(
 				"enhanced-link-suggestion-content"
@@ -320,9 +315,11 @@ export class EnhancedLinkSuggester extends EditorSuggest<MySuggestion> {
 	}
 
 	/**
-	 * This method is called when a suggestion is selected.
+	 * This method is called when a suggestion is selected by the user.
+	 * It replaces the trigger text with the selected link.
 	 * @param {MySuggestion} suggestion - The selected suggestion.
-	 * @param {KeyboardEvent | MouseEvent} event - The keyboard or mouse event.
+	 * @param {KeyboardEvent | MouseEvent} event - The keyboard or mouse event that triggered the selection.
+	 * @returns {void}
 	 */
 	selectSuggestion(
 		suggestion: MySuggestion,
@@ -333,7 +330,7 @@ export class EnhancedLinkSuggester extends EditorSuggest<MySuggestion> {
 		}
 
 		this.context.editor.replaceRange(
-			`[[${suggestion.insertText}]]`, // Use the pre-formatted insertText
+			`[[${suggestion.insertText}]]`,
 			this.context.start,
 			this.context.end
 		);
