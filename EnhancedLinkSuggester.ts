@@ -1,3 +1,9 @@
+/**
+ * @file This file contains the EnhancedLinkSuggester class, which provides an
+ * enhanced link suggestion experience in Obsidian.
+ * @author Beka
+ * @license MIT
+ */
 import {
 	App,
 	Editor,
@@ -12,63 +18,63 @@ import {
 import * as fuzzy from "fuzzy";
 
 /**
- * Represents a suggestion item in the link suggester. This interface defines the structure
- * for each suggestion that will be displayed to the user.
  * @interface MySuggestion
- * @property {"note" | "alias" | "heading" | "block" | "content"} type - The type of the suggestion, used for potential styling or logic.
- * @property {string} displayText - The text to display in the suggestion list (e.g., a note's basename or an alias).
- * @property {string} insertText - The text to insert into the editor when the suggestion is selected (e.g., `basename#heading`).
- * @property {string} filePath - The file path of the suggestion, used for filtering and identification.
- * @property {number} score - The score of the suggestion, used for sorting results. Higher is better.
- * @property {boolean} [isRecent] - A flag indicating if the suggestion is from a recently opened file.
- * @property {string} [content] - A content preview for the suggestion, such as the first line of a note.
- * @property {Array<{match: string, offset: number}>} [matches] - The matches of the query within the suggestion text, for highlighting (currently unused).
+ * @description Represents a suggestion item in the link suggester. This interface
+ * defines the structure for each suggestion that will be displayed to the user.
  */
 interface MySuggestion {
+	/** @property {"note" | "alias" | "heading" | "block" | "content"} type - The type of the suggestion. */
 	type: "note" | "alias" | "heading" | "block" | "content";
+	/** @property {string} displayText - The text to display in the suggestion list. */
 	displayText: string;
+	/** @property {string} insertText - The text to insert into the editor when selected. */
 	insertText: string;
+	/** @property {string} filePath - The file path of the suggestion. */
 	filePath: string;
+	/** @property {number} score - The score used for sorting results. */
 	score: number;
+	/** @property {boolean} [isRecent] - Flag indicating if the suggestion is from a recent file. */
 	isRecent?: boolean;
+	/** @property {string} [content] - A content preview for the suggestion. */
 	content?: string;
+	/** @property {Array<{match: string, offset: number}>} [matches] - Matches for highlighting (currently unused). */
 	matches?: { match: string; offset: number }[];
 }
 
 /**
- * Provides an enhanced link suggestion experience for Obsidian.
- * It extends the EditorSuggest class to provide context-aware link suggestions,
- * leveraging the Omnisearch plugin for content-based search.
+ * @class EnhancedLinkSuggester
  * @extends EditorSuggest<MySuggestion>
+ * @description Provides an enhanced link suggestion experience for Obsidian,
+ * leveraging the Omnisearch plugin for content-based search.
  */
 export class EnhancedLinkSuggester extends EditorSuggest<MySuggestion> {
 	/**
-	 * A list of recently opened files, kept in memory for quick access.
 	 * @private
+	 * @property {TFile[]} recentFiles - A list of recently opened files.
 	 */
 	private recentFiles: TFile[] = [];
 	/**
-	 * The maximum number of recent files to keep track of.
 	 * @private
 	 * @readonly
+	 * @property {number} MAX_RECENT_FILES - The maximum number of recent files to track.
 	 */
 	private readonly MAX_RECENT_FILES = 20;
 	/**
-	 * The number of characters to show before a match in the content preview.
 	 * @private
 	 * @readonly
+	 * @property {number} CHARS_BEFORE_MATCH - The number of characters to show before a match in the content preview.
 	 */
 	private readonly CHARS_BEFORE_MATCH = 20;
 	/**
-	 * The Omnisearch API instance, passed in during initialization.
 	 * @private
+	 * @property {typeof window.omnisearch} omnisearchApi - The Omnisearch API instance.
 	 */
 	private omnisearchApi: typeof window.omnisearch;
 
 	/**
-	 * Creates an instance of EnhancedLinkSuggester.
-	 * @param {App} app - The Obsidian App instance, used for accessing vault and workspace data.
-	 * @param {typeof window.omnisearch} omnisearchApi - The Omnisearch API instance for content-based searching.
+	 * @constructor
+	 * @param {App} app - The Obsidian App instance.
+	 * @param {typeof window.omnisearch} omnisearchApi - The Omnisearch API instance.
 	 */
 	constructor(app: App, omnisearchApi: typeof window.omnisearch) {
 		super(app);
@@ -78,11 +84,11 @@ export class EnhancedLinkSuggester extends EditorSuggest<MySuggestion> {
 	}
 
 	/**
-	 * Gets the first non-empty line of a file's content, excluding the frontmatter.
-	 * This is used to provide a content preview in the suggestion list.
 	 * @private
+	 * @method getFirstLineWithoutFrontmatter
+	 * @description Gets the first non-empty line of a file's content, excluding frontmatter.
 	 * @param {TFile} file - The file to read.
-	 * @returns {Promise<string>} The first line of the file's content after the frontmatter.
+	 * @returns {Promise<string>} The first non-empty line of content.
 	 */
 	private async getFirstLineWithoutFrontmatter(file: TFile): Promise<string> {
 		const content = await this.app.vault.cachedRead(file);
@@ -102,12 +108,13 @@ export class EnhancedLinkSuggester extends EditorSuggest<MySuggestion> {
 				return trimmedLine;
 			}
 		}
-		return ""; // Return empty string if no content is found after the frontmatter
+		return "";
 	}
 
 	/**
-	 * Updates the list of recent files by fetching the latest from the workspace.
 	 * @private
+	 * @method updateRecentFiles
+	 * @description Updates the list of recent files from the workspace.
 	 * @returns {void}
 	 */
 	private updateRecentFiles(): void {
@@ -120,12 +127,14 @@ export class EnhancedLinkSuggester extends EditorSuggest<MySuggestion> {
 	}
 
 	/**
-	 * This method is called by Obsidian to determine if the suggester should be triggered.
-	 * It triggers when the user types `[[` followed by some text.
-	 * @param {EditorPosition} cursor - The current cursor position in the editor.
+	 * @public
+	 * @method onTrigger
+	 * @description Called by Obsidian to determine if the suggester should be triggered.
+	 * Triggers on `[[` followed by some text.
+	 * @param {EditorPosition} cursor - The current cursor position.
 	 * @param {Editor} editor - The editor instance.
-	 * @param {TFile | null} file - The file the editor is currently in.
-	 * @returns {EditorSuggestTriggerInfo | null} Information about the trigger, or `null` if it shouldn't trigger.
+	 * @param {TFile | null} file - The current file.
+	 * @returns {EditorSuggestTriggerInfo | null} Trigger info or `null`.
 	 */
 	onTrigger(
 		cursor: EditorPosition,
@@ -151,10 +160,12 @@ export class EnhancedLinkSuggester extends EditorSuggest<MySuggestion> {
 	}
 
 	/**
-	 * This method is called by Obsidian to get the suggestions for the current query.
-	 * It combines results from recent files and an Omnisearch query.
-	 * @param {EditorSuggestContext} context - The context for the suggestions, including the query.
-	 * @returns {Promise<MySuggestion[]>} A promise that resolves to a sorted list of suggestions.
+	 * @public
+	 * @method getSuggestions
+	 * @description Called by Obsidian to get suggestions for the current query.
+	 * Combines results from recent files and an Omnisearch query.
+	 * @param {EditorSuggestContext} context - The suggestion context.
+	 * @returns {Promise<MySuggestion[]>} A promise resolving to a list of suggestions.
 	 */
 	async getSuggestions(
 		context: EditorSuggestContext
@@ -164,12 +175,10 @@ export class EnhancedLinkSuggester extends EditorSuggest<MySuggestion> {
 		const recentMatches: MySuggestion[] = [];
 		const currentFilePath = context.file?.path;
 
-		// Stage 1: Search within recent files for matches in title, aliases, and headings.
 		for (const file of this.recentFiles) {
 			const cache = this.app.metadataCache.getFileCache(file);
 			if (!cache) continue;
 
-			// Match against file title
 			const titleMatchResult = fuzzy.filter(query, [
 				file.basename.toLowerCase(),
 			]);
@@ -187,7 +196,6 @@ export class EnhancedLinkSuggester extends EditorSuggest<MySuggestion> {
 			}
 
 			if (query !== "") {
-				// Match against aliases
 				const frontmatter = cache.frontmatter as FrontMatterCache;
 				if (frontmatter && frontmatter.aliases) {
 					const aliases = fuzzy.filter<string>(
@@ -208,7 +216,6 @@ export class EnhancedLinkSuggester extends EditorSuggest<MySuggestion> {
 					}
 				}
 
-				// Match against headings
 				if (cache.headings) {
 					const headings = fuzzy.filter<HeadingCache>(
 						query,
@@ -240,7 +247,6 @@ export class EnhancedLinkSuggester extends EditorSuggest<MySuggestion> {
 			}
 		}
 
-		// Stage 2: If there's a query, use Omnisearch to find content-based matches.
 		if (query.length > 0 && this.omnisearchApi) {
 			try {
 				const omniResults = await this.omnisearchApi.search(query);
@@ -276,7 +282,6 @@ export class EnhancedLinkSuggester extends EditorSuggest<MySuggestion> {
 			}
 		}
 
-		// Combine, filter, and sort the suggestions.
 		const suggestions = Array.from(uniqueSuggestions.values());
 		const filteredSuggestions = suggestions.filter(
 			(sug) => sug.filePath !== currentFilePath
@@ -292,7 +297,9 @@ export class EnhancedLinkSuggester extends EditorSuggest<MySuggestion> {
 	}
 
 	/**
-	 * Renders a single suggestion item in the suggestion list.
+	 * @public
+	 * @method renderSuggestion
+	 * @description Renders a single suggestion item in the suggestion list.
 	 * @param {MySuggestion} suggestion - The suggestion to render.
 	 * @param {HTMLElement} el - The HTML element to render the suggestion into.
 	 * @returns {void}
@@ -315,10 +322,12 @@ export class EnhancedLinkSuggester extends EditorSuggest<MySuggestion> {
 	}
 
 	/**
-	 * This method is called when a suggestion is selected by the user.
-	 * It replaces the trigger text with the selected link.
+	 * @public
+	 * @method selectSuggestion
+	 * @description Called when a suggestion is selected by the user. Replaces the
+	 * trigger text with the selected link.
 	 * @param {MySuggestion} suggestion - The selected suggestion.
-	 * @param {KeyboardEvent | MouseEvent} event - The keyboard or mouse event that triggered the selection.
+	 * @param {KeyboardEvent | MouseEvent} event - The event that triggered the selection.
 	 * @returns {void}
 	 */
 	selectSuggestion(
